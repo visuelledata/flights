@@ -1,0 +1,46 @@
+---
+title: "Untitled"
+author: "Chris Peralta"
+date: "September 15, 2018"
+output: 
+  pdf_document
+    toc: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(nycflights13) # Available on CRAN, contains datasets
+library(tidyverse)
+```
+
+```{r pressure, include=FALSE}
+airlines <- airlines
+airports <- airports
+flights <- flights
+planes <- planes
+weather <- weather
+```
+
+In this project, I will attempt to predict departure delays using linear regression. I will begin by ...
+
+Before I begin, I'll tell you a little about the data. 
+- `airlines` is a list of airlines and their abbreviations
+- `airports` is a list of airports with their locations, timezones, and faa codes
+- `flights` is a list of all flights that departed NYC in 2013 with other related data
+- `planes` is a dataset of all of the planes that went on the flights above
+- `weather` is a dataset of the weather conditions by hour and airport for the year of 2013
+
+Below are some summary statistics for the `flights` dataset. 
+```{r dep_delay}
+summary(flights)
+```
+
+There are a few interesting observations above: 
+- `time_hour` has no clear meaning (it contains times rounded down to the nearest hour for joining the `weather` data with `flights`)
+- `air_time` aappears to be in minutes
+- Arrival and departure times are given in a 4-digit format
+
