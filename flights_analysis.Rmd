@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "NYC 2013 Flight Analysis"
 author: "Chris Peralta"
 date: "September 15, 2018"
 output: 
@@ -13,8 +13,10 @@ editor_options:
 ```{r setup, include=TRUE}
 knitr::opts_chunk$set(echo = TRUE)
 
-library(nycflights13) # Available on CRAN, contains datasets
-library(tidyverse)
+# All packages available on CRAN
+library(nycflights13) # Contains datasets
+library(tidyverse)    # A group of packages
+library(lubridate)    # For working with dates
 ```
 
 ```{r pressure, include=FALSE}
@@ -25,7 +27,7 @@ planes <- planes
 weather <- weather
 ```
 
-In this project, I will attempt to predict departure delays using linear regression. I will begin by ...
+In this project, I will analyze the 2013 flight data for New York City and build a model for predicting flight delays. I will begin by getting all of the time data into a more usable format, then I will begin analyzing the data, and finally I'll build the model. 
 
 Before I begin, I'll tell you a little about the data. 
 - `airlines` is a list of airlines and their abbreviations
@@ -44,3 +46,92 @@ There are a few interesting observations above:
 - `air_time` aappears to be in minutes
 - Arrival and departure times are given in a 4-digit format
 
+I'm going to start by getting all of the times in date-time format (POSIXct). Additionally, all departure times are in the US Eastern timezone and the arrival times are in the timezone of the local airports. 
+
+```{r clean_dates}
+# Convert all times to "23:12" format
+flights2 <- flights %>% 
+  rename(airtime = air_time) %>% 
+  mutate_at(vars(ends_with("_time")), 
+            function(x) {
+              x = str_pad(x, 4, pad = "0") 
+              x = paste0(str_sub(x, 1, 2), ":", str_sub(x, 3, 4))
+            }) %>% 
+  mutate(dep_time = paste0(year, "-", month, "-", day, " ", dep_time), 
+         sched_dep_time = paste0(year, "-", month, "-", day, " ", sched_dep_time)) %>% 
+  mutate_at(vars(contains("dep_time")), ymd_hm)
+
+
+# Add a day to flights that left the day after their scheduled departure time
+flights2 <- flights2 %>% 
+  mutate(dep_time = if_else(hour(sched_dep_time) > 22 & hour(dep_time) <= 21, 
+                            dep_time + days(1), 
+                            dep_time)) 
+
+# Convert arrival times to date-times
+flights2 <- flights2 %>% 
+  mutate(arr_time = paste0(year, "-", month, "-", day, " ", arr_time), 
+         sched_arr_time = paste0(year, "-", month, "-", day, " ", sched_arr_time)) %>% 
+  mutate_at(vars(contains("arr_time")), ymd_hm) 
+
+# Correcting dates for arrival times
+flights2 <- flights2 %>%
+  mutate(arr_time = if_else(arr_time < dep_time,
+                            arr_time + days(1),
+                            arr_time), 
+         sched_arr_time = if_else(sched_arr_time < sched_dep_time,
+                            sched_arr_time + days(1),
+                            sched_arr_time)) 
+
+# Fixing bug where flights that depart on the day after their scheduled date, are dated
+# a day later than they should be
+flights2 <- flights2 %>% 
+  mutate(dep_time = if_else(date(arr_time) - date(dep_time) < 0, 
+                            dep_time - days(1), 
+                            dep_time))
+
+```
+
+
+model: dep_delay = season + weekday + month + sched_dep_time + carrier + tailnum + dest + distance
+```{r}
+
+flights2 %>%  # most long flights are to Honolulu
+  ggplot(aes(x = distance)) +
+  geom_histogram()
+
+#Put these side by side?
+flights2 %>% 
+  mutate(dep_time = update(dep_time, yday = 1)) %>% 
+  select(dep_time) %>% 
+  ggplot(aes(x = dep_time)) + 
+  geom_histogram()
+
+flights2 %>% 
+  mutate(sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
+  ggplot(aes(x = sched_dep_time)) +
+  geom_histogram()
+
+# scatterplot of scheduled and actual departure times 
+flights2 %>% 
+  mutate(dep_time = update(dep_time, yday = 1), 
+         sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
+  ggplot(aes(x = sched_dep_time, y = dep_time)) + 
+  geom_point(alpha = .1)
+
+ggplot(flights2, aes(x = dep_delay)) + 
+  geom_histogram()
+
+flights2 %>% 
+  mutate(sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
+  ggplot(aes(x = sched_dep_time, y = dep_delay)) + 
+  geom_point(alpha = .1)
+qplot(data = flights2, x = update(sched_dep_time, yday = 1), y = dep_delay, 
+      geom = "point", alpha = .1)
+
+ggplot(flights2, aes(x = month)) + 
+  geom_bar()
+
+ggplot(flights2, aes(x = sched_dep_time)) + 
+  geom_histogram()
+```
