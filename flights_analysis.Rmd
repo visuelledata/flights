@@ -1,25 +1,33 @@
 ---
 title: "NYC 2013 Flight Analysis"
-author: "Chris Peralta"
+author: "Christopher Peralta"
 date: "September 15, 2018"
 output: 
   pdf_document
-    toc: true
-    number_sections: true
 editor_options: 
   chunk_output_type: console
 ---
 
-```{r setup, include=TRUE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r setup, include=TRUE, echo=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  echo = FALSE,
+  warning = FALSE, 
+  out.width = '75%',
+  out.height = '75%', 
+  comment = "#>", 
+  fig.keep = "last", 
+  dpi = 20)
+
 
 # All packages available on CRAN
 library(nycflights13) # Contains datasets
 library(tidyverse)    # A group of packages
 library(lubridate)    # For working with dates
+library(ggthemes)
 ```
 
-```{r pressure, include=FALSE}
+```{r pressure}
 airlines <- airlines
 airports <- airports
 flights <- flights
@@ -29,16 +37,18 @@ weather <- weather
 
 In this project, I will analyze the 2013 flight data for New York City and build a model for predicting flight delays. I will begin by getting all of the time data into a more usable format, then I will begin analyzing the data, and finally I'll build the model. 
 
-Before I begin, I'll tell you a little about the data. 
-- `airlines` is a list of airlines and their abbreviations
-- `airports` is a list of airports with their locations, timezones, and faa codes
-- `flights` is a list of all flights that departed NYC in 2013 with other related data
-- `planes` is a dataset of all of the planes that went on the flights above
+Before I begin, I'll tell you a little about the data. \newline
+- `airlines` is a list of airlines and their abbreviations \newline
+- `airports` is a list of airports with their locations, timezones, and faa codes \newline
+- `flights` is a list of all flights that departed NYC in 2013 with other related data \newline
+- `planes` is a dataset of all of the planes that went on the flights above \newline
 - `weather` is a dataset of the weather conditions by hour and airport for the year of 2013
 
 Below are some summary statistics for the `flights` dataset. 
 ```{r dep_delay}
-summary(flights)
+flights %>%
+  select(time_hour, air_time, arr_time, dep_time) %>% 
+  summary()
 ```
 
 There are a few interesting observations above: 
@@ -46,7 +56,7 @@ There are a few interesting observations above:
 - `air_time` aappears to be in minutes
 - Arrival and departure times are given in a 4-digit format
 
-I'm going to start by getting all of the times in date-time format (POSIXct). Additionally, all departure times are in the US Eastern timezone and the arrival times are in the timezone of the local airports. 
+It's also worth noting that all departure times are in the US Eastern timezone and the arrival times are in the timezone of the local airports. 
 
 ```{r clean_dates}
 # Convert all times to "23:12" format
@@ -94,44 +104,72 @@ flights2 <- flights2 %>%
 
 
 model: dep_delay = season + weekday + month + sched_dep_time + carrier + tailnum + dest + distance
+
+As you can see below, the longest flights are to Honolulu, Hawaii
 ```{r}
-
 flights2 %>%  # most long flights are to Honolulu
-  ggplot(aes(x = distance)) +
-  geom_histogram()
+  mutate(dest = dest == "HNL") %>% 
+  ggplot(aes(x = distance, fill = dest)) +
+  geom_histogram() + 
+  scale_fill_manual(values = c("grey60", "blue")) + 
+  theme(legend.position="none") + 
+  theme_tufte()
+```
 
+Above we can see the distances between flight origin and destination. It's worth mentioning that the longest flights (around 5000 miles) are all to Hawaii.  
+
+```{r}
 #Put these side by side?
 flights2 %>% 
   mutate(dep_time = update(dep_time, yday = 1)) %>% 
+  filter(year(dep_time) == 2013) %>% 
   select(dep_time) %>% 
   ggplot(aes(x = dep_time)) + 
-  geom_histogram()
+  geom_histogram() +
+  theme_tufte()
 
 flights2 %>% 
   mutate(sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
   ggplot(aes(x = sched_dep_time)) +
-  geom_histogram()
+  geom_histogram() + 
+  theme_tufte()
+```
 
+Above we can see histograms of the actual departure time and the scheduled departure time. 
+
+```{r}
 # scatterplot of scheduled and actual departure times 
 flights2 %>% 
+  filter(year(dep_time) == 2013) %>% 
   mutate(dep_time = update(dep_time, yday = 1), 
          sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
   ggplot(aes(x = sched_dep_time, y = dep_time)) + 
   geom_point(alpha = .1)
+```
 
+Most flights appear to leave New York on time, or with slight delays. The flights in the bottom right corner are flights that left the day after they were scheduled. 
+
+```{r}
 ggplot(flights2, aes(x = dep_delay)) + 
-  geom_histogram()
+  geom_histogram() + 
+  theme_tufte()
 
 flights2 %>% 
   mutate(sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
   ggplot(aes(x = sched_dep_time, y = dep_delay)) + 
-  geom_point(alpha = .1)
-qplot(data = flights2, x = update(sched_dep_time, yday = 1), y = dep_delay, 
-      geom = "point", alpha = .1)
+  geom_point(alpha = .1) + 
+  theme_tufte()
+
+flights2 %>% 
+  ggplot(aes(x = update(sched_dep_time, yday = 1), y = dep_delay)) + 
+  geom_point(alpha = .1) +
+  theme_tufte()
 
 ggplot(flights2, aes(x = month)) + 
-  geom_bar()
+  geom_bar() + 
+  theme_tufte()
 
 ggplot(flights2, aes(x = sched_dep_time)) + 
-  geom_histogram()
+  geom_histogram() + 
+  theme_tufte()
 ```
