@@ -3,7 +3,7 @@ title: "NYC 2013 Flight Analysis"
 author: "Christopher Peralta"
 date: "September 15, 2018"
 output: 
-  pdf_document
+  tufte::tufte_handout: default
 editor_options: 
   chunk_output_type: console
 ---
@@ -13,11 +13,14 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   echo = FALSE,
   warning = FALSE, 
-  out.width = '75%',
-  out.height = '75%', 
+  #out.width = '75%',
+  #out.height = '75%', 
   comment = "#>", 
-  fig.keep = "last", 
-  dpi = 20)
+  #fig.keep = "last", 
+  dpi = 160, 
+  warning = FALSE, 
+  message = FALSE, 
+  dev = 'jpeg')
 
 
 # All packages available on CRAN
@@ -25,6 +28,11 @@ library(nycflights13) # Contains datasets
 library(tidyverse)    # A group of packages
 library(lubridate)    # For working with dates
 library(ggthemes)
+library(hrbrthemes)
+library(cowplot)
+
+theme_set(theme_tufte())
+no_legend <- function() {theme(legend.position="none") }
 ```
 
 ```{r pressure}
@@ -33,6 +41,8 @@ airports <- airports
 flights <- flights
 planes <- planes
 weather <- weather
+color <- RColorBrewer::brewer.pal(9, "Pastel1")
+blues <- RColorBrewer::brewer.pal(9, "Blues")
 ```
 
 In this project, I will analyze the 2013 flight data for New York City and build a model for predicting flight delays. I will begin by getting all of the time data into a more usable format, then I will begin analyzing the data, and finally I'll build the model. 
@@ -45,16 +55,16 @@ Before I begin, I'll tell you a little about the data. \newline
 - `weather` is a dataset of the weather conditions by hour and airport for the year of 2013
 
 Below are some summary statistics for the `flights` dataset. 
-```{r dep_delay}
+```{r dep_delay, fig.margin=TRUE}
 flights %>%
   select(time_hour, air_time, arr_time, dep_time) %>% 
   summary()
 ```
 
-There are a few interesting observations above: 
-- `time_hour` has no clear meaning (it contains times rounded down to the nearest hour for joining the `weather` data with `flights`)
-- `air_time` aappears to be in minutes
-- Arrival and departure times are given in a 4-digit format
+There are a few interesting observations above: \newline
+- `time_hour` has no clear meaning (it contains times rounded down to the nearest hour for joining the `weather` data with `flights`) \newline
+- `air_time` aappears to be in minutes \newline
+- Arrival and departure times are given in a 4-digit format \newline
 
 It's also worth noting that all departure times are in the US Eastern timezone and the arrival times are in the timezone of the local airports. 
 
@@ -105,71 +115,118 @@ flights2 <- flights2 %>%
 
 model: dep_delay = season + weekday + month + sched_dep_time + carrier + tailnum + dest + distance
 
-As you can see below, the longest flights are to Honolulu, Hawaii
-```{r}
+#Departure delays
+
+##Distribution
+
+Let's start by looking at the distribution of departure delays. 
+```{r fig.margin=TRUE}
+ggplot(flights2, aes(x = dep_delay)) + 
+  geom_histogram() 
+```
+
+Most departure delays appear to be relatively short, with relatively few long delays. 
+
+##Distances of flights
+
+As you can see in the histogram, most flights are under 2,000 miles away. Additionally, all of the furthest flights are to Honolulu, Hawaii and they are colored in blue. 
+```{r fig.margin=TRUE}
 flights2 %>%  # most long flights are to Honolulu
   mutate(dest = dest == "HNL") %>% 
   ggplot(aes(x = distance, fill = dest)) +
   geom_histogram() + 
-  scale_fill_manual(values = c("grey60", "blue")) + 
-  theme(legend.position="none") + 
-  theme_tufte()
+  scale_fill_manual(values = c("grey60", blues[[9]])) + 
+  no_legend()
 ```
 
-Above we can see the distances between flight origin and destination. It's worth mentioning that the longest flights (around 5000 miles) are all to Hawaii.  
-
+Are departure delays affected by the distance of the flight? According to the plot below, it seems quite unlikely that distance significantly affects the departure delays.
 ```{r}
-#Put these side by side?
 flights2 %>% 
-  mutate(dep_time = update(dep_time, yday = 1)) %>% 
-  filter(year(dep_time) == 2013) %>% 
-  select(dep_time) %>% 
-  ggplot(aes(x = dep_time)) + 
-  geom_histogram() +
-  theme_tufte()
-
-flights2 %>% 
-  mutate(sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
-  ggplot(aes(x = sched_dep_time)) +
-  geom_histogram() + 
-  theme_tufte()
+  ggplot(aes(x = distance, y = dep_delay)) + 
+  geom_point(alpha = .1)
 ```
 
-Above we can see histograms of the actual departure time and the scheduled departure time. 
+##Scheduled times and actual times of departure
 
+Below, we can see a scatter plot of scheduled departure times versus actual departue times. Most flights appear to leave New York on time, or with slight delays. The flights in the bottom right corner are flights that left the day after they were scheduled. All flights with under 2 minute delays are colored in blue. 
 ```{r}
 # scatterplot of scheduled and actual departure times 
 flights2 %>% 
   filter(year(dep_time) == 2013) %>% 
   mutate(dep_time = update(dep_time, yday = 1), 
-         sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
-  ggplot(aes(x = sched_dep_time, y = dep_time)) + 
-  geom_point(alpha = .1)
+         sched_dep_time = update(sched_dep_time, yday = 1),
+         no_delay = dep_delay <= 2) %>% 
+  ggplot(aes(x = sched_dep_time, y = dep_time, color = no_delay)) + 
+  geom_point(alpha = .4) + 
+  scale_color_manual(values = c("grey60", blues[[8]])) + 
+  no_legend()
 ```
 
-Most flights appear to leave New York on time, or with slight delays. The flights in the bottom right corner are flights that left the day after they were scheduled. 
+#Delays with respect to time
 
+Below, we can see departure delays throughout the year of 2013. There seems to be a dip in departure delays between September and December. It appears that the delays vary with season. 
 ```{r}
-ggplot(flights2, aes(x = dep_delay)) + 
-  geom_histogram() + 
-  theme_tufte()
+flights2 %>% 
+  ggplot(aes(dep_time, dep_delay)) + 
+  geom_point(alpha = .1) + 
+  geom_line(color = "blue")
+```
 
+
+##Delays if all flights left on the same day
+
+Below, is a plot of the scheduled departure times versus the departure delays. It shows that flights that leave later usually have longer delays, where earlier flights typically have shorter delays. 
+```{r}
 flights2 %>% 
   mutate(sched_dep_time = update(sched_dep_time, yday = 1)) %>% 
   ggplot(aes(x = sched_dep_time, y = dep_delay)) + 
-  geom_point(alpha = .1) + 
-  theme_tufte()
+  geom_point(alpha = .1) 
+```
 
+##Delays if all flights happened in the same week
+
+Here is a plot that shows the average delay on each day of the weak. The average delay on Saturday is quite low. 
+```{r}
 flights2 %>% 
-  ggplot(aes(x = update(sched_dep_time, yday = 1), y = dep_delay)) + 
-  geom_point(alpha = .1) +
-  theme_tufte()
+  mutate(wday = wday(dep_time, label = TRUE)) %>% 
+  group_by(wday) %>% 
+  summarize(avg_delay = mean(dep_delay)) %>% 
+  filter(!is.na(wday)) %>% 
+  ggplot(aes(x = wday, y = avg_delay)) + 
+  geom_col()
+```
 
-ggplot(flights2, aes(x = month)) + 
-  geom_bar() + 
-  theme_tufte()
 
-ggplot(flights2, aes(x = sched_dep_time)) + 
-  geom_histogram() + 
-  theme_tufte()
+##Delays by month 
+
+```{r}
+month_delays <- flights2 %>% 
+  mutate(month = month(dep_time, label = TRUE)) %>% 
+  group_by(month) %>% 
+  summarize(avg_delay = mean(dep_delay)) %>% 
+  filter(!is.na(month)) %>% 
+  ggplot(aes(month, avg_delay)) + 
+  geom_col()
+
+month_delays
+```
+
+`r margin_note("https://www.timeanddate.com/weather/usa/new-york/climate"`)
+The seasonal trend seems to be quite significant. This implies that weather has a strong affect on departure delays. It's most likely that June and July are the rainiest months in the year, and that December is the snowiest. In the next section, I will look at the weather for the year of 2013. 
+
+#Weather
+
+I'll start by checking if the months with the worst weather do, in fact, have the longest departure delays. 
+```{r}
+flights_weather <- flights2 %>% 
+  left_join(weather, by = "time_hour") %>% 
+  
+weather %>% 
+  mutate(month = month(time_hour, label = TRUE)) %>% 
+  group_by(month) %>% 
+  summarize(total_precip = sum(precip)) %>% 
+  ggplot(aes(month, total_precip)) + 
+  geom_col()
+
+plot_grid(last_plot(), month_delays)
 ```
