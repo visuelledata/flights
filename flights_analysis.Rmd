@@ -8,7 +8,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-```{r setup, include=TRUE, echo=FALSE}
+```{r setup, include=TRUE, echo=FALSE, cache=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
   echo = FALSE,
@@ -17,10 +17,11 @@ knitr::opts_chunk$set(
   #out.height = '75%', 
   comment = "#>", 
   #fig.keep = "last", 
-  dpi = 160, 
+  dpi = 300, 
   warning = FALSE, 
   message = FALSE, 
-  dev = 'jpeg')
+  dev = 'jpeg', 
+  cache = TRUE)
 
 
 # All packages available on CRAN
@@ -31,7 +32,7 @@ library(ggthemes)
 library(hrbrthemes)
 library(cowplot)
 
-theme_set(theme_tufte())
+theme_set(theme_ipsum())
 no_legend <- function() {theme(legend.position="none") }
 ```
 
@@ -41,7 +42,7 @@ airports <- airports
 flights <- flights
 planes <- planes
 weather <- weather
-color <- RColorBrewer::brewer.pal(9, "Pastel1")
+color <- RColorBrewer::brewer.pal(12, "Set3")
 blues <- RColorBrewer::brewer.pal(9, "Blues")
 ```
 
@@ -55,10 +56,10 @@ Before I begin, I'll tell you a little about the data. \newline
 - `weather` is a dataset of the weather conditions by hour and airport for the year of 2013
 
 Below are some summary statistics for the `flights` dataset. 
-```{r dep_delay, fig.margin=TRUE}
+```{r}
 flights %>%
   select(time_hour, air_time, arr_time, dep_time) %>% 
-  summary()
+  summary() 
 ```
 
 There are a few interesting observations above: \newline
@@ -143,7 +144,8 @@ Are departure delays affected by the distance of the flight? According to the pl
 ```{r}
 flights2 %>% 
   ggplot(aes(x = distance, y = dep_delay)) + 
-  geom_point(alpha = .1)
+  geom_point(alpha = .1) + 
+  theme_ipsum_tw()
 ```
 
 ##Scheduled times and actual times of departure
@@ -164,12 +166,11 @@ flights2 %>%
 
 #Delays with respect to time
 
-Below, we can see departure delays throughout the year of 2013. There seems to be a dip in departure delays between September and December. It appears that the delays vary with season. 
+Below, we can see departure delays throughout the year of 2013. There seems to be a dip in departure delays between September and December. This leads me to believe that the delays vary with season. 
 ```{r}
 flights2 %>% 
-  ggplot(aes(dep_time, dep_delay)) + 
-  geom_point(alpha = .1) + 
-  geom_line(color = "blue")
+  ggplot(aes(x = dep_time, y = dep_delay)) + 
+  geom_point(alpha = .1) 
 ```
 
 
@@ -211,16 +212,13 @@ month_delays <- flights2 %>%
 month_delays
 ```
 
-`r margin_note("https://www.timeanddate.com/weather/usa/new-york/climate"`)
-The seasonal trend seems to be quite significant. This implies that weather has a strong affect on departure delays. It's most likely that June and July are the rainiest months in the year, and that December is the snowiest. In the next section, I will look at the weather for the year of 2013. 
+The seasonal trend seems to be quite significant. This implies that weather has a strong affect on departure delays. My guess is that June and July are the rainiest months in the year, and that December is the snowiest. In the next section, I will look at the weather for the year of 2013. 
 
 #Weather
 
-I'll start by checking if the months with the worst weather do, in fact, have the longest departure delays. 
-```{r}
-flights_weather <- flights2 %>% 
-  left_join(weather, by = "time_hour") %>% 
-  
+I started by checking if the months with the most precipitation do, in fact, have the longest departure delays. Which as shown in the figures to the right, is true. 
+```{r fig.margin=TRUE}
+# create precip vs dep_delay
 weather %>% 
   mutate(month = month(time_hour, label = TRUE)) %>% 
   group_by(month) %>% 
@@ -228,5 +226,37 @@ weather %>%
   ggplot(aes(month, total_precip)) + 
   geom_col()
 
-plot_grid(last_plot(), month_delays)
+month_delays
 ```
+
+```{r}
+flights_weather <- flights2 %>% 
+  left_join(weather, by = c("time_hour", "year", "month", "day"))
+
+flights_weather %>% 
+  group_by(date = floor_date(time_hour, "week")) %>% 
+  summarize(avg_delay = mean(dep_delay, na.rm = TRUE), 
+            tot_precip = sum(precip, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = avg_delay)) + 
+  geom_point() + 
+  geom_line(aes(date, tot_precip), color = blues[[7]]) + 
+  annotate(geom = 'text', x = ymd_hms("2013-8-12 00:00:00"), y = 230, 
+           label = "Total precipitation each week - Line plot", 
+           color = blues[[7]], size = 3)
+```
+
+It seems somewhat likely that precipitation has some sort of effect on departure delays. However, it appears that wind speed does not have any effect as shown in the plot to the right. 
+```{r fig.margin=TRUE}
+flights_weather %>% 
+  group_by(date = floor_date(time_hour, "4 days")) %>% 
+  summarize(avg_delay = mean(dep_delay, na.rm = TRUE), 
+            tot_precip = mean(wind_speed, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = avg_delay)) + 
+  geom_point() + 
+  geom_line(aes(date, tot_precip), color = color[[6]], size = 1) + 
+  annotate(geom = 'text', x = ymd_hms("2013-8-12 00:00:00"), y = 22, 
+           label = "Mean wind speed every 4 days - Line plot", 
+           color = color[[6]], size = 4)
+```
+
+#Do some modeling
