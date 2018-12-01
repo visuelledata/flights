@@ -8,7 +8,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-```{r setup, include=TRUE, echo=FALSE, cache=FALSE}
+```{r setup, include=TRUE, echo=FALSE, cache=FALSE, message=FALSE, warning=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
   echo = FALSE,
@@ -33,7 +33,7 @@ library(hrbrthemes)
 library(cowplot)
 
 theme_set(theme_ipsum())
-no_legend <- function() {theme(legend.position="none") }
+source("gghelpers.R")
 ```
 
 ```{r pressure}
@@ -46,29 +46,20 @@ color <- RColorBrewer::brewer.pal(12, "Set3")
 blues <- RColorBrewer::brewer.pal(9, "Blues")
 ```
 
-In this project, I will analyze the 2013 flight data for New York City and build a model for predicting flight delays. I will begin by getting all of the time data into a more usable format, then I will begin analyzing the data, and finally I'll build the model. 
+In this project, I will analyze the 2013 flight data for New York City and build a model for predicting arrival delays. I will begin by analyzing the data, followed by making a model to predict arrival delays. 
 
-Before I begin, I'll tell you a little about the data. \newline
+Before I begin, I'll tell you a little about the datasets. \newline
 - `airlines` is a list of airlines and their abbreviations \newline
 - `airports` is a list of airports with their locations, timezones, and faa codes \newline
 - `flights` is a list of all flights that departed NYC in 2013 with other related data \newline
 - `planes` is a dataset of all of the planes that went on the flights above \newline
 - `weather` is a dataset of the weather conditions by hour and airport for the year of 2013
 
-Below are some summary statistics for the `flights` dataset. 
-```{r}
-flights %>%
-  select(time_hour, air_time, arr_time, dep_time) %>% 
-  summary() 
-```
+Before I begin, it's also worth noting that all departure times are in the US Eastern timezone and the arrival times are in the timezone of the local airports. 
 
-There are a few interesting observations above: \newline
-- `time_hour` has no clear meaning (it contains times rounded down to the nearest hour for joining the `weather` data with `flights`) \newline
-- `air_time` aappears to be in minutes \newline
-- Arrival and departure times are given in a 4-digit format \newline
+#What can you use this for? 
 
-It's also worth noting that all departure times are in the US Eastern timezone and the arrival times are in the timezone of the local airports. 
-
+The model I built has a variety of possible uses. It can give us an idea as to what variables affect the arrival delays the most. It could be used as part of an in-flight system to give a better idea of arrival times at the start of the start of the flight, although I believe GPS-based estimates will likely be more accurate.
 ```{r clean_dates}
 # Convert all times to "23:12" format
 flights2 <- flights %>% 
@@ -109,14 +100,94 @@ flights2 <- flights2 %>%
 flights2 <- flights2 %>% 
   mutate(dep_time = if_else(date(arr_time) - date(dep_time) < 0, 
                             dep_time - days(1), 
-                            dep_time))
+                            dep_time)) %>% 
+  mutate(season = 
+           cut(sched_dep_time, 
+               breaks = ymd_hms("2013-01-01 00:00:00", "2013-06-21 00:00:00", 
+                                "2013-09-23 00:00:00", "2014-01-01 00:00:00"),
+               labels = c("spring", "summer", "fall"))
+         ) %>% 
+  left_join(airlines, by = "carrier") %>% 
+  rename(carrier_name = name)
+  
 
+flights_weather <- flights2 %>% 
+  left_join(weather, by = c("time_hour", "year", "month", "day"))
+
+planes <- planes %>% 
+  rename(year_manufactured = year)
+
+flights_all <- flights_weather %>% 
+  left_join(planes, by = "tailnum") %>% 
+  select(-year, -month, -day, -hour.x, -minute, 
+         -time_hour, -origin.y, -hour.y) %>% 
+  mutate_if(is.character, as.factor)
 ```
 
+#How people fly?
 
-model: dep_delay = season + weekday + month + sched_dep_time + carrier + tailnum + dest + distance
+From the chart below, we can see that flights throughout the year are quite consistent. Additionally, in the boxplot to the right, we see that the distribution of flights appears close to normal. 
 
-#Departure delays
+```{r fig.margin=TRUE}
+flights2 %>% 
+  mutate(dep_time = date(dep_time)) %>% 
+  filter(!is.na(dep_time)) %>% 
+  group_by(dep_time) %>% 
+  summarize(count = n()) %>%
+  filter(count > 931 - 3 * 108.7658 & count < 931 + 3 * 108.7658) %>% 
+  ggplot(aes(x = "Flights", y = count)) + 
+  geom_boxplot() + # make caption about how extreme outliers were removed
+  no_y_grid()
+```
+
+##What time do people fly? 
+```{r}
+flights2 %>% 
+  ggplot(aes(x = dep_time)) +
+  geom_freqpoly(bins = 365)
+```
+
+```{r}
+flights2 %>% 
+  mutate(dep_time = update(dep_time, yday = 1)) %>% 
+  filter(year(dep_time) == 2013) %>% 
+  ggplot(aes(x = dep_time)) + 
+  geom_freqpoly(bins = 80) 
+```
+
+```{r fig.fullwidth=TRUE, fig.width=11}
+flights2 %>% 
+  mutate(wday = wday(dep_time, label = TRUE), 
+         dep_time = update(dep_time, yday = 1)) %>% 
+  filter(year(dep_time) == 2013) %>% 
+  ggplot(aes(x = dep_time)) + 
+  geom_freqpoly(bins = 80) + 
+  facet_wrap(~ wday, nrow = 1)
+```
+
+#Airlines
+
+Below you can see the distribution of positive arrival delays by airline sorted by median.
+```{r fig.fullwidth=TRUE, fig.width=11, fig.height=7, fig.keep='last'}
+temp <- flights2 %>% 
+  filter(arr_delay >= 0) %>% 
+  ggplot(aes(fct_reorder(carrier_name, arr_delay), arr_delay)) + 
+  geom_boxplot() + 
+  coord_flip(ylim = c(-100, 1300)) 
+
+flights2 %>% 
+  # group_by(carrier_name) %>% 
+  # summarize(median_arr_delay = median(arr_delay, na.rm = TRUE)) %>% 
+  # arrange(desc(median_arr_delay))
+  ggplot(aes(fct_reorder(carrier_name, arr_delay), arr_delay)) + 
+  geom_boxplot() + 
+  geom_hline(yintercept = 0, color = color[[4]]) + 
+  coord_flip(ylim = c(-100, 1300)) 
+
+plot_grid(temp, last_plot(), rows = 2, cols = 1)
+```
+
+#Arrival delays
 
 ##Distribution
 
@@ -230,9 +301,6 @@ month_delays
 ```
 
 ```{r}
-flights_weather <- flights2 %>% 
-  left_join(weather, by = c("time_hour", "year", "month", "day"))
-
 flights_weather %>% 
   group_by(date = floor_date(time_hour, "week")) %>% 
   summarize(avg_delay = mean(dep_delay, na.rm = TRUE), 
@@ -259,4 +327,50 @@ flights_weather %>%
            color = color[[6]], size = 4)
 ```
 
-#Do some modeling
+#Is there a non meteorological seasonal effect?
+
+It's possible that there is a seasonal effect that isn't based on the weather. People fly more often at certain times of the year and certain days. Reasons for this include holidays, work, and weather. 
+
+
+
+
+
+
+
+
+
+
+
+```{r model, eval=FALSE}
+temp.lm <- lm(dep_delay ~ sched_dep_time + sched_arr_time + carrier + dest + airtime + distance + temp + precip + wind_speed + wind_gust + humid + wind_dir + pressure + visib + year_manufactured, data = flights_all)
+
+temp.lm <- lm(dep_delay ~ sched_dep_time + sched_arr_time + airtime + distance + temp + precip + wind_speed + humid + wind_dir + pressure + visib + year_manufactured, data = flights_all)
+
+temp.lm <- lm(arr_delay ~ dep_delay + sched_dep_time + sched_arr_time + airtime + distance + temp + precip + wind_speed + humid + wind_dir + pressure + visib + year_manufactured, data = flights_all)
+
+flights_all %>% 
+  add_residuals(temp.lm) %>% 
+  ggplot(aes(arr_delay, resid)) + 
+  geom_point(alpha = .1)
+```
+
+The model is quite bad, if we exclude arr_delay. But if we include arr_delay, then the model is useless in practical scenarios because anyone who is using it won't have access to the future information
+
+#Why the model is bad
+https://www.bts.gov/topics/airlines-and-airports/understanding-reporting-causes-flight-delays-and-cancellations
+## 
+
+#How the model could be improved. 
+
+##Adding more data
+
+One likely cause for delays is the airplane arriving after the scheduled arrival time on its previous flight causing a departure delay for its next flight. 
+https://www.bts.gov/topics/airlines-and-airports/understanding-reporting-causes-flight-delays-and-cancellations
+
+##Using a more complex model
+
+A more complex model could probably do a better job predicting arrival delays, but its uncertain how much it could improve the predictions with the current data. 
+
+##Modifying the problem
+
+The underlying problem could be modified. In other words, rather than predicting the duration of the flight delay, we could predict whether or not there will be a significant delay. 
